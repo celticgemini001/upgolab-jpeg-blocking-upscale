@@ -212,6 +212,37 @@ faithfully magnifies nothing. Deblocking after operates once, on the already-int
 and the interpolation has already redistributed the step across 16 px so the correction is smaller
 per pixel. Doing it after is cheaper because the artifact is cheaper after.</p>
 
+<h3>Before you reach for a blur or a median filter</h3>
+
+<p>Deblocking is not the same operation as smoothing, and the two get conflated because they both
+reduce <code>R</code>. Applied to the same q=50 source before a 2× upscale:</p>
+
+<table>
+<thead><tr><th>Pre-filter</th><th class="num">PSNR</th><th class="num">SSIM</th><th class="num">R</th><th class="num">step</th><th class="num">HF vs GT</th></tr></thead>
+<tbody>
+<tr><td>none</td><td class="num">31.19</td><td class="num">0.9785</td><td class="num">1.782</td><td class="num">1.77</td><td class="num">119.3%</td></tr>
+<tr><td>deblock s=0.5</td><td class="num">30.34</td><td class="num">0.9788</td><td class="num">0.901</td><td class="num">0.84</td><td class="num">108.7%</td></tr>
+<tr><td>deblock s=1.0</td><td class="num">28.83</td><td class="num">0.9745</td><td class="num">0.231</td><td class="num">0.22</td><td class="num">106.9%</td></tr>
+<tr><td>gaussian σ=0.6</td><td class="num">29.05</td><td class="num">0.9795</td><td class="num">1.660</td><td class="num">1.05</td><td class="num">70.3%</td></tr>
+<tr><td>gaussian σ=1.0</td><td class="num">26.68</td><td class="num">0.9702</td><td class="num">1.402</td><td class="num">0.60</td><td class="num">44.0%</td></tr>
+<tr><td>median 3×3</td><td class="num">27.18</td><td class="num">0.9745</td><td class="num">1.732</td><td class="num">1.04</td><td class="num">62.3%</td></tr>
+</tbody>
+</table>
+
+<p>A σ=0.6 gaussian drops <code>R</code> from 1.782 to 1.660 — only 15.5% of the seam's excess over
+1.0 — and the price is 49 points of high-frequency detail: it keeps 59% of the detail the unfiltered
+pipeline had, for 2.14 dB. The median filter is worse on both axes, removing 6.3% of the excess
+while keeping 52% of the detail. The lattice deblocker at s=0.5 takes <code>R</code> below 1.0
+(0.901), meaning the boundary no longer carries more gradient than the block interior at all, and
+still keeps 91% of the detail for 0.85 dB — it is the only filter in the table that buys seam
+reduction more cheaply than it spends detail.</p>
+
+<p>One detail worth noting: deblock s=0.5 is the only row where <strong>SSIM goes up</strong>
+(0.9788 against 0.9785 for no filter), and gaussian σ=0.6 goes higher still at 0.9795 — while
+keeping barely half the detail. SSIM's 11×11 window over a 1.5 px gaussian means a mild blur that
+removes a seam scores well, which is the same structural blindness that makes SSIM a poor guide for
+this artifact.</p>
+
 <h3>Strength, and the point where the metric goes to zero</h3>
 
 <table>
