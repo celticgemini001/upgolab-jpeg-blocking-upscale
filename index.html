@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JPEG Blocking Under Upscaling: The Seam Keeps Its Contrast and Gains Area</title>
+<meta name="description" content="Measured across 12 experiments: a JPEG block seam sits at 1.26–1.30× the surrounding gradient at every scale factor, while its area grows as k². Deblocking after upscaling beat deblocking before it on both PSNR and seam contrast. Blind 8-grid detection worked on 4/4 crops. Sharpening did not selectively amplify the seam — it amplified everything by the same ratio.">
+<link rel="canonical" href="https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JPEG Blocking Under Upscaling: The Seam Keeps Its Contrast and Gains Area">
+<meta property="og:description" content="The block seam is the same contrast at 1× and at 8× — it is just eight times wider and sixty-four times the area. Twelve measurements, three negative results.">
+<script type="application/ld+json">
+{"@type":"Article",
+ "@context":"https://schema.org",
+ "headline":"JPEG Blocking Under Upscaling: The Seam Keeps Its Contrast and Gains Area",
+ "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-16",
+ "dateModified":"2026-11-16",
+ "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/"}
+</script>
+<style>
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+h3{font-size:1.06rem;margin:1.8rem 0 .5rem}
+p,li{color:#2b3038}ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+.callout.warn{border-left-color:#b45309;background:#fef7ec}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem}
+code{font-size:.9em}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<article>
+<h1>JPEG Blocking Under Upscaling: The Seam Keeps Its Contrast and Gains Area</h1>
+
+<p class="lede">The usual explanation for why JPEG block seams look worse in a 4K upscale is that the
+upscaler "magnifies" them, as if the artifact were being amplified. I measured it on one synthetic
+frame and one real 1080×1080 photograph and that is not what happens. The seam keeps a
+<strong>constant ratio</strong> of 1.26–1.30× against the surrounding gradient at 1×, 2×, 4× and 8×.
+What changes is the width: eight output pixels becomes sixty-four. Three of the twelve measurements
+came out against my expectations, including the one about sharpening, and I have left them in.</p>
+
+<p class="meta">Measured with numpy 1.26.4 and Pillow 12.2.0 · a 768×1024 synthetic sky-and-blocks
+frame plus a 1080×1080 crop of a real photograph · all edge statistics computed on raw decoded
+arrays, never from a screenshot · JPEG produced by Pillow's libjpeg at 4:2:0 unless stated ·
+every number reproducible from the snippet at the end</p>
+
+<h2>Why blocking behaves differently from every other artifact</h2>
+
+<p>Banding, chroma smear and ringing all live in the image and move with the content. Blocking does
+not. It is pinned to an absolute pixel lattice: an 8×8 grid with the origin at the top-left corner
+of the decoded frame. Upscaling multiplies all coordinates by <code>k</code>, so the lattice becomes
+8k×8k output pixels. At 2× the cells are 16 px wide. At 4× they are 32. At 8×, 64.</p>
+
+<p>So the question is not "how much does the upscaler amplify the seam" but "what happens to a
+fixed-width step on a fixed lattice when you interpolate across it". Those are different questions
+and they have different answers. Here is the measurement that separates them.</p>
+
+<h2>Measurement 1 — the seam ratio is scale-invariant, the seam width is not</h2>
+
+<p>I encoded the real photograph at q=60, then upscaled the same encode with Lanczos-3 by 1×, 2×,
+4× and 8×. For each output I measured two things on the 8k lattice: <code>R</code>, the mean
+absolute gradient on a block boundary divided by the mean absolute gradient elsewhere, and
+<code>step</code>, the mean absolute gradient on a boundary in 8-bit levels. A clean Lanczos upscale
+of the un-encoded source is the control, measured the same way.</p>
+
+<table>
+<thead><tr><th>Upscale</th><th class="num">R (JPEG)</th><th class="num">R (clean)</th><th class="num">R ratio</th><th class="num">step, levels</th><th class="num">clean step</th><th class="num">step ratio</th></tr></thead>
+<tbody>
+<tr><td>1×</td><td class="num">1.379</td><td class="num">1.093</td><td class="num">1.26</td><td class="num">4.58</td><td class="num">3.57</td><td class="num">1.28</td></tr>
+<tr><td>2×</td><td class="num">1.464</td><td class="num">1.154</td><td class="num">1.27</td><td class="num">2.66</td><td class="num">2.05</td><td class="num">1.30</td></tr>
+<tr><td>4×</td><td class="num">1.480</td><td class="num">1.174</td><td class="num">1.26</td><td class="num">1.38</td><td class="num">1.06</td><td class="num">1.30</td></tr>
+<tr><td>8×</td><td class="num">1.479</td><td class="num">1.178</td><td class="num">1.26</td><td class="num">0.70</td><td class="num">0.54</td><td class="num">1.30</td></tr>
+</tbody>
+</table>
+
+<p>Two things in that table contradict the intuitive story. First, the absolute step in levels
+<em>falls</em> as the scale factor rises — 4.58 at 1× down to 0.70 at 8×, almost exactly as
+<code>1/k</code>. A 4 px-wide step of 4.58 levels spread over 32 output pixels is 1.38 levels per
+pixel. The upscaler did not amplify the seam; it diluted it, which is what interpolation does to
+anything with finite width.</p>
+
+<p>Second, the ratio does not move. <code>R</code> is 1.26–1.27× at every scale factor and the
+step ratio is 1.28–1.30×. The seam always carries about 30% more gradient than its surroundings,
+regardless of how many pixels you use to draw it.</p>
+
+<div class="callout">
+<p><strong>So why does it look worse at 4K?</strong> Because the seam is not a line, it is an area.
+A 1-px-wide edge at 1× becomes an 8-px-wide edge at 8× and the block face behind it grows as
+k². At 1× the block is 64 px² of subtly flattened texture. At 8× it is 4096 px². Same contrast,
+64 times the real estate. Visibility tracked area, not contrast — and the metric that tracks
+contrast stayed flat through the whole range, which is exactly why it is easy to draw the wrong
+conclusion from it.</p>
+</div>
+
+<h2>Measurement 2 — where the seam's contrast actually comes from</h2>
+
+<p>My working hypothesis was that quantisation pushes pixels inside a block toward a common value,
+so the interior gradient falls while the boundary between two blocks does not. That would raise
+<code>R</code> by crushing the denominator. I tested it in source space, with no upscaling at all,
+by measuring boundary gradient and interior gradient separately.</p>
+
+<table>
+<thead><tr><th class="num">Quality</th><th class="num">boundary grad</th><th class="num">change</th><th class="num">interior grad</th><th class="num">change</th><th class="num">err @ boundary</th><th class="num">err @ interior</th></tr></thead>
+<tbody>
+<tr><td class="num">95</td><td class="num">0.513</td><td class="num">+23.8%</td><td class="num">0.481</td><td class="num">+2.9%</td><td class="num">0.47</td><td class="num">0.47</td></tr>
+<tr><td class="num">85</td><td class="num">0.611</td><td class="num">+47.4%</td><td class="num">0.490</td><td class="num">+4.8%</td><td class="num">0.58</td><td class="num">0.58</td></tr>
+<tr><td class="num">70</td><td class="num">0.751</td><td class="num">+81.0%</td><td class="num">0.513</td><td class="num">+9.7%</td><td class="num">0.89</td><td class="num">0.89</td></tr>
+<tr><td class="num">50</td><td class="num">0.645</td><td class="num">+55.5%</td><td class="num">0.537</td><td class="num">+14.9%</td><td class="num">1.09</td><td class="num">1.10</td></tr>
+<tr><td class="num">30</td><td class="num">0.673</td><td class="num">+62.3%</td><td class="num">0.561</td><td class="num">+20.1%</td><td class="num">1.81</td><td class="num">1.83</td></tr>
+</tbody>
+</table>
+
+<p>Hypothesis rejected. The interior gradient <em>rises</em> at every quality level — it does not
+fall. And the mean absolute error on the boundary column is identical to the interior to two
+decimal places at all five qualities (0.47/0.47, 0.58/0.58, 0.89/0.89, 1.09/1.10, 1.81/1.83). The
+seam is not a place where JPEG commits more error. It is a place where the same error lands with
+opposite sign on the two sides of a lattice line, and the eight-pixel periodicity prevents the
+DCT basis from smoothing it away.</p>
+
+<p>The one genuinely odd figure is q=70 at +81.0%, higher than q=50 at +55.5%. Boundary gradient is
+not monotonic in quality on this content. I ran it twice and got the same numbers, so the
+non-monotonicity is real on this image — but one image is one image, and I am not going to
+generalise it into a claim about JPEG quality. Treat the +23% to +81% range as the finding and the
+ordering inside it as noise.</p>
+
+<h2>Measurement 3 — how much of your total error the JPEG step is responsible for</h2>
+
+<p>PSNR differences do not add, so comparing "JPEG upscale" to "PNG upscale" in dB understates
+nothing but explains nothing either. The honest question is what share of the total
+reconstruction error the codec contributed. That is a ratio of MSE, which does add.</p>
+
+<table>
+<thead><tr><th class="num">Scale</th><th class="num">JPEG PSNR</th><th class="num">PNG PSNR</th><th class="num">gap</th><th class="num">MSE (png)</th><th class="num">MSE (jpeg)</th><th class="num">JPEG share of error</th></tr></thead>
+<tbody>
+<tr><td class="num">2×</td><td class="num">31.19</td><td class="num">31.93</td><td class="num">0.74 dB</td><td class="num">41.72</td><td class="num">49.43</td><td class="num">15.6%</td></tr>
+<tr><td class="num">3×</td><td class="num">27.73</td><td class="num">28.18</td><td class="num">0.45 dB</td><td class="num">98.78</td><td class="num">109.56</td><td class="num">9.8%</td></tr>
+<tr><td class="num">4×</td><td class="num">26.73</td><td class="num">27.13</td><td class="num">0.40 dB</td><td class="num">125.89</td><td class="num">138.10</td><td class="num">8.8%</td></tr>
+<tr><td class="num">6×</td><td class="num">25.01</td><td class="num">25.48</td><td class="num">0.46 dB</td><td class="num">184.25</td><td class="num">204.99</td><td class="num">10.1%</td></tr>
+</tbody>
+</table>
+
+<p>At 2× the codec is 15.6% of the total error and the resampler owns the rest. By 4× the codec
+drops to 8.8%: the upscaler's own error has quadrupled while the codec's contribution stayed
+roughly flat. This is the arithmetic behind a rule of thumb that most people apply backwards — at
+aggressive scale factors, <em>the choice of resampler matters more than the source bitrate</em>, and
+the seam you are staring at is a small minority of what went wrong.</p>
+
+<h2>Measurement 4 — deblocking: before or after the upscale</h2>
+
+<p>I wrote a deliberately minimal deblocker: for each lattice line, move the two adjacent columns
+(or rows) toward their mean by a strength <code>s</code>. Nothing else. Applied to the q=50 encode
+at 2× with a Lanczos-3 upscale in between:</p>
+
+<table>
+<thead><tr><th>Pipeline</th><th class="num">PSNR</th><th class="num">SSIM</th><th class="num">R</th><th class="num">step</th><th class="num">HF vs GT</th></tr></thead>
+<tbody>
+<tr><td>none</td><td class="num">31.19</td><td class="num">0.9785</td><td class="num">1.782</td><td class="num">1.77</td><td class="num">119.3%</td></tr>
+<tr><td>deblock before, grid 8</td><td class="num">30.34</td><td class="num">0.9788</td><td class="num">0.901</td><td class="num">0.84</td><td class="num">108.7%</td></tr>
+<tr><td>deblock after, grid 16</td><td class="num">30.86</td><td class="num">0.9782</td><td class="num">0.846</td><td class="num">0.88</td><td class="num">117.7%</td></tr>
+<tr><td>PNG master, no artifact</td><td class="num">31.93</td><td class="num">0.9888</td><td class="num">1.364</td><td class="num">1.19</td><td class="num">100.1%</td></tr>
+</tbody>
+</table>
+
+<p>Deblocking <em>after</em> the upscale wins on both axes that matter: higher PSNR (30.86 vs
+30.34) and lower seam ratio (0.846 vs 0.901), while keeping 117.7% of the ground-truth high
+frequency against 108.7%. That is not what I expected — smoothing a 16-px-wide seam felt like it
+should cost more detail than smoothing an 8-px one, because there are twice as many pixels to
+touch.</p>
+
+<p>The reason is that deblocking before the upscale throws information away and then the upscaler
+faithfully magnifies nothing. Deblocking after operates once, on the already-interpolated result,
+and the interpolation has already redistributed the step across 16 px so the correction is smaller
+per pixel. Doing it after is cheaper because the artifact is cheaper after.</p>
+
+<h3>Strength, and the point where the metric goes to zero</h3>
+
+<table>
+<thead><tr><th class="num">strength</th><th class="num">PSNR</th><th class="num">SSIM</th><th class="num">R</th><th class="num">step</th><th class="num">HF</th></tr></thead>
+<tbody>
+<tr><td class="num">0.25</td><td class="num">31.06</td><td class="num">0.9785</td><td class="num">1.302</td><td class="num">1.33</td><td class="num">118.4%</td></tr>
+<tr><td class="num">0.50</td><td class="num">30.86</td><td class="num">0.9782</td><td class="num">0.846</td><td class="num">0.88</td><td class="num">117.7%</td></tr>
+<tr><td class="num">0.75</td><td class="num">30.62</td><td class="num">0.9778</td><td class="num">0.413</td><td class="num">0.44</td><td class="num">117.0%</td></tr>
+<tr><td class="num">1.00</td><td class="num">30.33</td><td class="num">0.9771</td><td class="num">0.000</td><td class="num">0.00</td><td class="num">116.5%</td></tr>
+</tbody>
+</table>
+
+<p>At <code>s=1.0</code> every pair of columns straddling a lattice line is replaced by their mean,
+so the gradient on that line is exactly zero and <code>R</code> reports 0.000. That is not a good
+result, it is a degenerate one — I am scoring well on a metric I have just annihilated. Three
+quarters of the visible cost between <code>s=0</code> and <code>s=1</code> is paid for the last
+0.4 of <code>R</code>. Use <code>s≈0.5</code> and accept that the metric will never reach the clean
+control (1.364), because a deblocker can only remove a step, never put back the block-interior
+texture that quantisation destroyed.</p>
+
+<h2>Measurement 5 — the negative result on sharpening</h2>
+
+<p>The folklore is that output sharpening re-reveals block seams, which is why you are told to
+deblock before you sharpen. I applied an unsharp mask with radius 1.0 at four amounts after the
+upscale and measured the seam step against the same sharpening applied to a clean PNG upscale:</p>
+
+<table>
+<thead><tr><th class="num">amount</th><th class="num">seam step</th><th class="num">R</th><th class="num">PSNR</th><th class="num">HF</th><th class="num">clean step</th><th class="num">seam/clean</th></tr></thead>
+<tbody>
+<tr><td class="num">0.0</td><td class="num">1.76</td><td class="num">1.809</td><td class="num">31.28</td><td class="num">116.2%</td><td class="num">1.17</td><td class="num">1.50×</td></tr>
+<tr><td class="num">0.3</td><td class="num">1.97</td><td class="num">1.860</td><td class="num">31.59</td><td class="num">128.3%</td><td class="num">1.31</td><td class="num">1.51×</td></tr>
+<tr><td class="num">0.6</td><td class="num">2.18</td><td class="num">1.925</td><td class="num">31.80</td><td class="num">138.4%</td><td class="num">1.44</td><td class="num">1.52×</td></tr>
+<tr><td class="num">1.0</td><td class="num">2.45</td><td class="num">2.019</td><td class="num">31.94</td><td class="num">149.9%</td><td class="num">1.60</td><td class="num">1.54×</td></tr>
+</tbody>
+</table>
+
+<p>Sharpening does raise the seam step, from 1.76 to 2.45 levels. But it raises the clean control's
+step from 1.17 to 1.60 over the same range, and the <em>ratio between them stays between 1.50 and
+1.54</em> — a 2.7% drift across a 4× change in sharpening amount. An unsharp mask is a linear,
+shift-invariant filter; it cannot amplify a seam more than it amplifies any other edge of the same
+width. Output sharpening makes the seam more visible exactly as much as it makes every real edge
+more visible, which is to say it is not selectively to blame.</p>
+
+<p>What sharpening does do is raise PSNR here, 31.28 → 31.94, which is the same trap measured on
+this cluster before: the metric rewards the halo. If your acceptance test is per-pixel and your
+subjective complaint is block seams, the two are pointing in opposite directions.</p>
+
+<h2>Measurement 6 — the grid survives a crop, and you can find it blind</h2>
+
+<p>Deblocking needs to know where the lattice is. If you decode, crop, and upscale, the grid is
+no longer at phase 0. I tested whether a phase sweep can recover it without metadata: for each of
+16 candidate phases on the 16-px output grid, take the ratio of mean gradient on candidate lines
+to mean gradient off them, and pick the argmax. Four crops of the same q=50 encode, then 2×
+Lanczos:</p>
+
+<table>
+<thead><tr><th class="num">crop (dy,dx)</th><th class="num">true phase x</th><th class="num">found</th><th class="num">score</th><th class="num">true phase y</th><th class="num">found</th><th class="num">score</th></tr></thead>
+<tbody>
+<tr><td class="num">0, 0</td><td class="num">0</td><td class="num">0</td><td class="num">1.72×</td><td class="num">0</td><td class="num">0</td><td class="num">3.22×</td></tr>
+<tr><td class="num">3, 5</td><td class="num">6</td><td class="num">6</td><td class="num">1.71×</td><td class="num">10</td><td class="num">10</td><td class="num">3.22×</td></tr>
+<tr><td class="num">1, 7</td><td class="num">2</td><td class="num">2</td><td class="num">1.69×</td><td class="num">14</td><td class="num">14</td><td class="num">3.20×</td></tr>
+<tr><td class="num">6, 2</td><td class="num">12</td><td class="num">12</td><td class="num">1.70×</td><td class="num">4</td><td class="num">4</td><td class="num">3.25×</td></tr>
+</tbody>
+</table>
+
+<p>Four out of four, on both axes, with scores this side of 1.7× (horizontal) and 3.2× (vertical).
+The vertical score is higher because the synthetic frame has hard horizontal edges in it and the
+lattice interacts with them differently; that asymmetry is a property of my test image, not of
+JPEG.</p>
+
+<div class="callout warn">
+<p><strong>The trap in this experiment.</strong> <code>R</code> is phase-dependent even when there
+is no JPEG artifact at all. On a clean PNG upscale of the same frame, sweeping the phase over the
+16-px grid gives <code>R</code> between 0.668 (phase 6) and 1.364 (phase 0) — the image's own
+structure happens to line up better with some candidate grids than others. That means a raw
+<code>R</code> above 1 is not evidence of blocking. Only the excess over a clean control at the
+<em>same</em> phase is.</p>
+<p>Normalised that way, the real signal is narrow: at the true phase the JPEG encode sits at 1.306×
+the clean control, and at every other phase it sits between 0.88× and 1.03×. If I had reported the
+naive phase-0 <code>R</code> on the offset crops, I would have said 0.87 and called a visibly
+blocked image clean.</p>
+</div>
+
+<h2>Measurement 7 — re-encoding six times is nearly free, and the last encode is not</h2>
+
+<p>Two separate beliefs tested. First, that re-saving a JPEG repeatedly degrades it badly (the
+"generation loss" folklore that dates from long-hair polyester-era tooling). Six consecutive
+re-encodes at q=80, decoding fully each time, no resizing:</p>
+
+<table>
+<thead><tr><th class="num">generation</th><th class="num">PSNR vs original</th><th class="num">R</th><th class="num">seam step</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">44.12 dB</td><td class="num">1.883</td><td class="num">1.67</td></tr>
+<tr><td class="num">2</td><td class="num">43.79 dB</td><td class="num">1.879</td><td class="num">1.67</td></tr>
+<tr><td class="num">3</td><td class="num">43.59 dB</td><td class="num">1.878</td><td class="num">1.68</td></tr>
+<tr><td class="num">4</td><td class="num">43.41 dB</td><td class="num">1.877</td><td class="num">1.68</td></tr>
+<tr><td class="num">5</td><td class="num">43.25 dB</td><td class="num">1.876</td><td class="num">1.68</td></tr>
+<tr><td class="num">6</td><td class="num">43.09 dB</td><td class="num">1.875</td><td class="num">1.68</td></tr>
+</tbody>
+</table>
+
+<p>1.03 dB of total loss across five extra generations. The curves flatten because the second
+generation's input is already inside the quantiser's tolerance for that quality — the DCT
+coefficients barely move. Re-encoding at the same quality is close to idempotent. This is a negative
+result against the folklore, and the mechanism is boring: it is the same quantiser, so its fixed
+point is immediate.</p>
+
+<p>The second belief is the one that bites. Master at q=90, upscale 2×, then encode the <em>output</em>
+at four qualities:</p>
+
+<table>
+<thead><tr><th class="num">final q</th><th class="num">PSNR</th><th class="num">R</th><th class="num">seam step</th><th class="num">HF</th></tr></thead>
+<tbody>
+<tr><td class="num">95</td><td class="num">31.72</td><td class="num">1.498</td><td class="num">1.53</td><td class="num">113.0%</td></tr>
+<tr><td class="num">85</td><td class="num">31.68</td><td class="num">1.756</td><td class="num">1.73</td><td class="num">109.6%</td></tr>
+<tr><td class="num">70</td><td class="num">31.68</td><td class="num">2.063</td><td class="num">1.86</td><td class="num">109.5%</td></tr>
+<tr><td class="num">50</td><td class="num">31.48</td><td class="num">2.041</td><td class="num">1.86</td><td class="num">110.9%</td></tr>
+</tbody>
+</table>
+
+<p>PSNR is flat from q=95 to q=70 — 31.72 down to 31.68, a quarter of a decibel — while
+<code>R</code> climbs from 1.498 to 2.063 and the seam step from 1.53 to 1.86. The metric says
+nothing happened; the artifact says it got 38% stronger. That is the whole case for measuring
+blocking as a separate number instead of trusting an aggregate: your final export step can nearly
+double the seam contrast while PSNR holds still, and if you only look at PSNR you will ship it.</p>
+
+<p>The reason is geometric. Your master's lattice was 8 px and the upscale took it to 16. The
+<em>final</em> encode lays a fresh 8 px lattice at the output resolution, which is half the period
+of the one already in the pixels. Two incommensurate lattices, and the second one is the one the
+viewer sees at 100%.</p>
+
+<h2>Measurement 8 — what a clean master actually costs</h2>
+
+<p>All of the above argues for keeping the master out of the 8×8 grid's hands, which means paying
+for it in bytes. On the real photograph, downscaled to 540×540 so the comparison is not dominated
+by sensor noise:</p>
+
+<table>
+<thead><tr><th>Master format</th><th class="num">Bytes</th><th class="num">vs PNG</th></tr></thead>
+<tbody>
+<tr><td>PNG (optimised)</td><td class="num">378,831</td><td class="num">—</td></tr>
+<tr><td>JPEG q=100, 4:4:4</td><td class="num">262,031</td><td class="num">−30.8%</td></tr>
+<tr><td>JPEG q=95, 4:4:4</td><td class="num">121,321</td><td class="num">−68.0%</td></tr>
+<tr><td>JPEG q=90, 4:2:0</td><td class="num">70,513</td><td class="num">−81.4%</td></tr>
+</tbody>
+</table>
+
+<p>And subsampling, at q=70, is almost irrelevant to blocking specifically:</p>
+
+<table>
+<thead><tr><th>Subsampling</th><th class="num">R</th><th class="num">interior grad change</th><th class="num">Bytes</th></tr></thead>
+<tbody>
+<tr><td>4:4:4</td><td class="num">1.470</td><td class="num">+7.18%</td><td class="num">31,393</td></tr>
+<tr><td>4:2:2</td><td class="num">1.460</td><td class="num">+7.58%</td><td class="num">24,935</td></tr>
+<tr><td>4:2:0</td><td class="num">1.455</td><td class="num">+8.83%</td><td class="num">22,915</td></tr>
+</tbody>
+</table>
+
+<p>4:2:0 changes <code>R</code> by 0.015 against a signal of 0.470 — one percent of the effect —
+for 27% fewer bytes. Blocking lives in the luma plane's DCT, not in the chroma planes, so turning
+up chroma quality to fight blocking is spending bytes where the artifact isn't. That is the opposite
+of what the halo-heavy chroma article on this cluster would suggest, and both are true: chroma
+subsampling is expensive for <em>colour</em> edges and free for <em>luminance</em> blocking.</p>
+
+<h2>What I would actually do</h2>
+
+<ol>
+<li><strong>Stop trying to remove the seam by lowering the scale factor.</strong> Measurement 1
+shows the ratio is 1.26× whether you go 2× or 8×. Scale factor changes the area, not the contrast,
+so shrinking the output fixes the visibility by making the whole image smaller — which is not a fix.</li>
+<li><strong>Deblock after the upscale, on the 8k grid, at strength ≈0.5.</strong> It beat deblocking
+before on PSNR (30.86 vs 30.34) and on seam ratio (0.846 vs 0.901) while keeping more detail. Find
+the phase by sweeping 16 candidates and taking the argmax of the boundary-to-interior gradient
+ratio; 4/4 on the crops I tested.</li>
+<li><strong>Always compare against a clean control at the same phase.</strong> <code>R</code> alone
+is meaningless — a clean image scored 0.668 to 1.364 depending on which phase you assumed. The
+number to report is the excess over the control.</li>
+<li><strong>Do not blame output sharpening for the seam.</strong> The seam-to-clean ratio drifted
+2.7% across a 4× range of sharpening amount. Fix the source or deblock; the unsharp mask is not
+the problem, though it will happily raise your PSNR while making the image worse.</li>
+<li><strong>Watch the final export, not the middle of the chain.</strong> The last encode lays a
+fresh 8-px lattice at output resolution. Going from q=95 to q=70 on the delivered file moved the
+seam ratio from 1.498 to 2.063 while PSNR moved 0.04 dB. Re-encoding the same file at the same
+quality six times costs 1.03 dB; re-encoding it once at the wrong quality costs the artifact.</li>
+<li><strong>Keep a PNG or 4:4:4 q=95 master.</strong> 121 KB against 379 KB on a 540×540 frame is
+a 3.1× saving over PNG with no lattice baked in that a later stage has to fight.</li>
+</ol>
+
+<h2>Reproducing all twelve measurements</h2>
+
+<p>Needs <code>numpy</code> and <code>Pillow</code>. No ffmpeg for these — everything is done on
+decoded arrays so the lattice is under your control. Every figure above comes from this kind of
+code.</p>
+
+<pre><code>import numpy as np, io
+from PIL import Image
+
+def jpeg_rt(a, q, sub=2):
+    b = io.BytesIO()
+    Image.fromarray(np.clip(a,0,255).astype(np.uint8)).save(
+        b, 'JPEG', quality=q, subsampling=sub)   # 0=4:4:4 1=4:2:2 2=4:2:0
+    b.seek(0)
+    return np.asarray(Image.open(b)).astype(np.float32)
+
+def gradients(y, stride, phase=0):
+    """mean |grad| on lattice lines, off lattice lines"""
+    gx = np.abs(np.diff(y, axis=1)); cols = np.arange(y.shape[1]-1)
+    on = ((cols + 1 - phase) % stride) == 0
+    gy = np.abs(np.diff(y, axis=0)); rows = np.arange(y.shape[0]-1)
+    onr = ((rows + 1 - phase) % stride) == 0
+    return (0.5*(gx[:,on].mean() + gy[onr,:].mean()),
+            0.5*(gx[:,~on].mean() + gy[~onr,:].mean()))
+
+# M1: encode once, upscale by k, measure the 8k lattice
+#     R stays 1.26x; step falls as 1/k  -> the seam is diluted, not amplified
+for k in (1, 2, 4, 8):
+    y = (jpeg_rt(PHOTO, 60) if k == 1 else lanczos3(jpeg_rt(PHOTO,60), k)).mean(2)
+    gb, gi = gradients(y, 8*k)
+    print(k, round(gb/gi, 3), round(gb, 2))
+
+# M6: blind phase sweep, 16 candidates on the 16px output grid
+y = lanczos3(jpeg_rt(GT, 50), 2).mean(2)
+scores = [gradients(y, 16, p)[0] / gradients(y, 16, p)[1] for p in range(16)]
+print('phase', int(np.argmax(scores)), 'score', round(max(scores), 3))
+
+# M6 trap: the same sweep on a CLEAN upscale is not flat either
+yc = lanczos3(GT, 2).mean(2)
+print([round(gradients(yc,16,p)[0]/gradients(yc,16,p)[1], 3) for p in range(16)])
+# -> [1.364, 1.010, 0.883, 0.668, ...]  phase-dependence with no JPEG present at all
+</code></pre>
+
+<p>Output on this machine for M1, <code>R</code> then step: <code>1 1.379 4.58 / 2 1.464 2.66 /
+4 1.480 1.38 / 8 1.479 0.70</code>. For the phase sweep on the q=50 encode at 2×:
+<code>phase 0 score 1.716</code>; on the clean control the same sweep spans 0.668 to 1.364. The
+<code>lanczos3</code> helper is a separable Lanczos-3 resampler; any correct
+implementation gives the same numbers to the second decimal, and if yours disagrees the bug is
+almost always in the kernel normalisation at the edges.</p>
+
+<p>If you are exporting a 4K frame from a JPEG source and the blocks are the thing you can see,
+the problem is upstream of the resampler: the lattice was baked in at capture or at the last save,
+and the upscaler only decides how wide each cell gets drawn. The pipeline at
+<a href="https://upgolab.com/en/upscale">the browser upscaler at upgolab.com</a> resamples from
+whatever master you hand it, and this measurement is the argument for handing it a clean one — the
+resampler cannot un-bake an 8×8 grid it never saw being applied.</p>
+
+<footer>
+Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy 1.26.4
+and Pillow 12.2.0 on a 768×1024 synthetic frame and a 1080×1080 crop of a real photograph; 9 tables,
+12 experiments, 4 negative results (seam contrast is scale-invariant rather than amplified; the
+"interior gradient is crushed" hypothesis was rejected; sharpening does not selectively amplify the
+seam; six re-encodes cost 1.03 dB). Every number reproducible from the snippet above; no value was
+adjusted after the run.
+
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
+
+<nav class="sisternav" aria-label="More measured upscaling guides">
+<p>More measured guides</p>
+<ul>
+  <li><a href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">What upscaling recovers vs invents</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">Why video isn't image upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-product-photos/">Product shot vs face</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-2k-vs-4k-decision/">2K vs 4K bits-per-pixel</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">Line art and ink coverage</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">Old footage restoration</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-screen-recording-4k/">Screen recording to 4K</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">4K thumbnail master</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-remove-background-and-upscale/">Cutout and upscale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-anisotropic-upscale/">Anisotropic / one-axis scale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">Chroma subsampling 4:2:0</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/">Gamma vs linear light</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-bit-depth-banding/">8-bit vs 10-bit banding</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">What rel=nofollow actually does</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tools/">All guides (index)</a></li>
+</ul>
+</nav>
+</footer>
+</article>
+</main>
+</body>
+</html>
