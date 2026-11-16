@@ -42,6 +42,15 @@ pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1r
 code{font-size:.9em}
 footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -67,7 +76,7 @@ not. It is pinned to an absolute pixel lattice: an 8×8 grid with the origin at 
 of the decoded frame. Upscaling multiplies all coordinates by <code>k</code>, so the lattice becomes
 8k×8k output pixels. At 2× the cells are 16 px wide. At 4× they are 32. At 8×, 64.</p>
 
-<p>So the question is not "how much does the upscaler amplify the seam" but "what happens to a
+<p>So the question is not "how much does the upscaler amplify the <a href="https://celticgemini001.github.io/upgolab-tiled-upscale-seams/">seam</a>" but "what happens to a
 fixed-width step on a fixed lattice when you interpolate across it". Those are different questions
 and they have different answers. Here is the measurement that separates them.</p>
 
@@ -201,7 +210,7 @@ at 2× with a Lanczos-3 upscale in between:</p>
 </tbody>
 </table>
 
-<p>Deblocking <em>after</em> the upscale wins on both axes that matter: higher PSNR (30.86 vs
+<p><a href="https://celticgemini001.github.io/upgolab-output-format-after-upscale/">Deblocking</a> <em>after</em> the upscale wins on both axes that matter: higher PSNR (30.86 vs
 30.34) and lower seam ratio (0.846 vs 0.901), while keeping 117.7% of the ground-truth high
 frequency against 108.7%. That is not what I expected — smoothing a 16-px-wide seam felt like it
 should cost more detail than smoothing an 8-px one, because there are twice as many pixels to
@@ -488,6 +497,8 @@ and the upscaler only decides how wide each cell gets drawn. The pipeline at
 whatever master you hand it, and this measurement is the argument for handing it a clean one — the
 resampler cannot un-bake an 8×8 grid it never saw being applied.</p>
 
+
+</article>
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy 1.26.4
 and Pillow 12.2.0 on a 768×1024 synthetic frame and a 1080×1080 crop of a real photograph; 12 tables,
@@ -495,16 +506,6 @@ and Pillow 12.2.0 on a 768×1024 synthetic frame and a 1080×1080 crop of a real
 "interior gradient is crushed" hypothesis was rejected; sharpening does not selectively amplify the
 seam; six re-encodes cost 1.03 dB). Every number reproducible from the snippet above; no value was
 adjusted after the run.
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
@@ -537,7 +538,6 @@ adjusted after the run.
 </ul>
 </nav>
 </footer>
-</article>
 </main>
 </body>
 </html>
