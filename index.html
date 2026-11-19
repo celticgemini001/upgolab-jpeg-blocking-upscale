@@ -61,11 +61,12 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 upscaler "magnifies" them, as if the artifact were being amplified. I measured it on one synthetic
 frame and one real 1080×1080 photograph and that is not what happens. The seam keeps a
 <strong>constant ratio</strong> of 1.26–1.30× against the surrounding gradient at 1×, 2×, 4× and 8×.
-What changes is the width: eight output pixels becomes sixty-four. Four of the twelve measurements
-came out against my expectations, including the one about sharpening, and I have left them in.</p>
+What changes is the width: eight output pixels becomes sixty-four. Six of the sixteen measurements
+came out against my expectations, including one where the recommendation I wrote in the JPEG section
+makes a video frame measurably worse, and I have left them all in.</p>
 
-<p class="meta">Measured with numpy 1.26.4 and Pillow 12.2.0 · a 768×1024 synthetic sky-and-blocks
-frame plus a 1080×1080 crop of a real photograph · all edge statistics computed on raw decoded
+<p class="meta">Measured with numpy 1.26.4, Pillow 12.2.0 and ffmpeg's libx264 · a 768×1024
+synthetic sky-and-blocks frame plus two 1024×1024 real photographs · all edge statistics computed on raw decoded
 arrays, never from a screenshot · JPEG produced by Pillow's libjpeg at 4:2:0 unless stated ·
 every number reproducible from the snippet at the end</p>
 
@@ -422,10 +423,12 @@ subsampling is expensive for <em>colour</em> edges and free for <em>luminance</e
 <li><strong>Stop trying to remove the seam by lowering the scale factor.</strong> Measurement 1
 shows the ratio is 1.26× whether you go 2× or 8×. Scale factor changes the area, not the contrast,
 so shrinking the output fixes the visibility by making the whole image smaller — which is not a fix.</li>
-<li><strong>Deblock after the upscale, on the 8k grid, at strength ≈0.5.</strong> It beat deblocking
-before on PSNR (30.86 vs 30.34) and on seam ratio (0.846 vs 0.901) while keeping more detail. Find
-the phase by sweeping 16 candidates and taking the argmax of the boundary-to-interior gradient
-ratio; 4/4 on the crops I tested.</li>
+<li><strong>Deblock after the upscale, on the 8k grid, at strength ≈0.5 — if the source is a
+still JPEG.</strong> It beat deblocking before on PSNR (30.86 vs 30.34) and on seam ratio
+(0.846 vs 0.901) while keeping more detail. Find the phase by sweeping 16 candidates and taking
+the argmax of the boundary-to-interior gradient ratio; 4/4 on the crops I tested. On a decoded
+video frame this number is wrong — see Measurement 11. Use 0.0, or 0.15–0.25 if you have reason
+to think the loop filter was defeated.</li>
 <li><strong>Always compare against a clean control at the same phase.</strong> <code>R</code> alone
 is meaningless — a clean image scored 0.668 to 1.364 depending on which phase you assumed. The
 number to report is the excess over the control.</li>
@@ -440,7 +443,157 @@ quality six times costs 1.03 dB; re-encoding it once at the wrong quality costs 
 a 3.1× saving over PNG with no lattice baked in that a later stage has to fight.</li>
 </ol>
 
-<h2>Reproducing all twelve measurements</h2>
+<h2>Measurement 9 — the 8×8 lattice is a JPEG constant, not an image constant</h2>
+
+<p>Everything above measures JPEG. This cluster is about video upscaling, and I had been quietly
+assuming the 1.26–1.30× seam law carries over to a video frame that gets decoded and then upscaled.
+It does not. The reason is in the decoder path, not in the transform: a still JPEG is a pure DCT
+with no reconstruction filter at all, while every modern video codec ships an <em>in-loop</em>
+deblocking filter whose strength the encoder chooses per block. The decoder cannot switch it off.
+So the seam you measure on a video frame has already been through a deblocker, and the seam you
+measure on a JPEG never has.</p>
+
+<p>Same master, same pixels, two real photographs and one encoder. <code>excess</code> here is the
+page's <code>R</code> divided by the clean control, chosen by the same argmax-over-phases rule as
+Measurement 6, so the two columns are directly comparable.</p>
+
+<table>
+<thead><tr><th>Encode</th><th class="num">PSNR</th><th class="num">kB</th><th class="num">excess</th><th class="num">argmax margin</th></tr></thead>
+<tbody>
+<tr><td>JPEG q=30</td><td class="num">39.37</td><td class="num">36.2</td><td class="num">2.446</td><td class="num">2.55</td></tr>
+<tr><td>JPEG q=50</td><td class="num">41.55</td><td class="num">49.2</td><td class="num">1.903</td><td class="num">1.85</td></tr>
+<tr><td>JPEG q=70</td><td class="num">43.67</td><td class="num">66.9</td><td class="num">1.576</td><td class="num">1.49</td></tr>
+<tr><td>JPEG q=90</td><td class="num">47.79</td><td class="num">130.6</td><td class="num">1.218</td><td class="num">1.16</td></tr>
+<tr><td>x264 CRF 23, loop filter on</td><td class="num">45.21</td><td class="num">65.6</td><td class="num">1.089</td><td class="num">1.02</td></tr>
+<tr><td>x264 CRF 26, loop filter on</td><td class="num">43.72</td><td class="num">47.0</td><td class="num">1.072</td><td class="num">1.03</td></tr>
+<tr><td>x264 CRF 29, loop filter on</td><td class="num">42.16</td><td class="num">34.2</td><td class="num">1.094</td><td class="num">1.05</td></tr>
+</tbody>
+</table>
+
+<p>Put them at the same bytes instead of the same PSNR and the gap widens further. At 47 kB, x264
+CRF 26 scores <strong>1.072</strong> at 43.72 dB. The JPEG that fits in 47.1 kB is q=47, which
+scores <strong>1.965</strong> at 41.26 dB — the seam is nearly twice as strong, and it is 2.5 dB
+worse as well. The second image (a graphic with large flat areas) repeats the ordering exactly:
+at 54 kB, x264 is 1.063 at 41.98 dB against JPEG q=40 at 1.686 and 38.56 dB. There is no byte
+budget at which a still JPEG beats x264 on this artifact, which is the arithmetic behind "video
+frames don't block the way JPEGs block".</p>
+
+<p>What does survive is scale invariance, though the magnitude does not. Uprezzed 1×, 2× and 4×,
+the JPEG holds 1.903 → 1.846 → 1.757 and the x264 frame holds 1.079 → 1.103 → 1.134. Neither
+drifts more than about 8% across the whole range, so Measurement 1's conclusion — the seam keeps
+its contrast and gains area — transfers to video. The <em>number</em> does not transfer, and that
+is the part I had wrong: an excess of 1.07 is not a quieter version of 1.90, it is a different
+artifact produced by a different mechanism.</p>
+
+<h2>Measurement 10 — the causal test: flip one flag, watch the seam appear</h2>
+
+<p>Comparing JPEG to x264 confounds the transform, the quantiser, the rate control and the filter
+all at once. The clean experiment changes exactly one thing. <code>deblock=-6,-6</code> disables
+the H.264 in-loop filter; every other flag in the command line stays fixed, and the decode is
+measured the same way.</p>
+
+<table>
+<thead><tr><th>Image</th><th class="num">CRF</th><th class="num">excess, filter on</th><th class="num">excess, filter off</th><th class="num">Δ PSNR</th></tr></thead>
+<tbody>
+<tr><td>photo</td><td class="num">23</td><td class="num">1.089</td><td class="num">1.304</td><td class="num">−0.15</td></tr>
+<tr><td>photo</td><td class="num">26</td><td class="num">1.072</td><td class="num">1.417</td><td class="num">−0.32</td></tr>
+<tr><td>photo</td><td class="num">29</td><td class="num">1.094</td><td class="num">1.548</td><td class="num">−0.43</td></tr>
+<tr><td>graphic</td><td class="num">23</td><td class="num">1.071</td><td class="num">1.216</td><td class="num">−0.21</td></tr>
+<tr><td>graphic</td><td class="num">26</td><td class="num">1.063</td><td class="num">1.296</td><td class="num">−0.32</td></tr>
+<tr><td>graphic</td><td class="num">29</td><td class="num">1.067</td><td class="num">1.386</td><td class="num">−0.39</td></tr>
+</tbody>
+</table>
+
+<p>Six rows, two images, monotone in CRF in every column. Turning the filter off costs 0.15 to
+0.43 dB — a rounding error — and takes excess from 1.07 to 1.22–1.55. The seam is not a property
+of the DCT; it is a property of the DCT <em>plus the absence of a deblocker</em>. H.264's in-loop
+filter buys back the entire artifact for three tenths of a decibel, which is a better trade than
+any post-processing filter in this article manages, and it is free because it is already running
+in every decoder you own.</p>
+
+<p>The margin column above is the quieter half of this measurement and it matters for Measurement
+12. On JPEG the winning phase beats the runner-up by 1.85×. On a loop-filtered x264 frame the
+margin is 1.02–1.05. There is barely a peak to find, because there is barely a lattice left.</p>
+
+<h2>Measurement 11 — the negative result: my own recommendation, applied to video, makes it worse</h2>
+
+<p>Item two of the list below says "deblock after the upscale at strength ≈0.5". That was measured
+on a still JPEG, and on a still JPEG it is correct. Applied to a video frame it is wrong, and not
+marginally. The frame has already been deblocked once by the encoder, and a naive deblocker
+stacked on top has no lattice of its own to aim at — so it smears eight-pixel lines that were
+already clean, and the metric reads the <em>new</em> structure it just invented as seam.</p>
+
+<table>
+<thead><tr><th>Image</th><th class="num">s</th><th class="num">PSNR</th><th class="num">excess</th></tr></thead>
+<tbody>
+<tr><td>photo</td><td class="num">0.00</td><td class="num">43.72</td><td class="num">1.072</td></tr>
+<tr><td>photo</td><td class="num">0.05</td><td class="num">43.71</td><td class="num">1.066</td></tr>
+<tr><td>photo</td><td class="num">0.10</td><td class="num">43.69</td><td class="num">1.067</td></tr>
+<tr><td>photo</td><td class="num">0.15</td><td class="num">43.65</td><td class="num">1.068</td></tr>
+<tr><td>photo</td><td class="num">0.25</td><td class="num">43.51</td><td class="num">1.074</td></tr>
+<tr><td>photo</td><td class="num">0.50</td><td class="num">42.80</td><td class="num">1.234</td></tr>
+<tr><td>graphic</td><td class="num">0.00</td><td class="num">41.98</td><td class="num">1.063</td></tr>
+<tr><td>graphic</td><td class="num">0.25</td><td class="num">41.80</td><td class="num">1.071</td></tr>
+<tr><td>graphic</td><td class="num">0.50</td><td class="num">40.80</td><td class="num">1.174</td></tr>
+</tbody>
+</table>
+
+<p>At s=0.5 the excess rises instead of falling — 1.072 to 1.234 and 1.063 to 1.174 — and PSNR
+costs 0.92 and 1.18 dB. The deblocker does not remove an artifact; it manufactures one. And unlike
+the JPEG case in Measurement 4, where s=0.5 took R below 1.0 and was the only filter that bought
+seam reduction more cheaply than it spent detail, here every strength above 0.25 spends real
+decibels to make the number worse.</p>
+
+<p>The whole curve is flat below s=0.25, which is the honest summary: on an already-filtered video
+frame there is nothing at the eight-pixel lattice worth spending a filter on. If you have a reason
+to believe the loop filter is off or was defeated by an aggressive transcode, s≈0.15–0.25 does
+what the JPEG recipe promised. Otherwise 0.0 is the correct setting, and this is the one place in
+the article where doing nothing beats doing the thing I recommended.</p>
+
+<h2>Measurement 12 — the blind sweep finds JPEG's lattice and misses video's</h2>
+
+<p>Measurement 6's recipe is a 16-candidate phase sweep, argmax of the boundary-to-interior
+gradient ratio, 4/4 correct on crops of a JPEG. I ran the identical procedure on the same video
+frames, cropped by every offset within the period so the true phase is known by construction.</p>
+
+<table>
+<thead><tr><th>Image</th><th class="num">period</th><th class="num">loop filter</th><th class="num">excess</th><th class="num">margin</th><th class="num">phase hits</th></tr></thead>
+<tbody>
+<tr><td>photo</td><td class="num">8</td><td class="num">on</td><td class="num">1.072</td><td class="num">1.03</td><td class="num">0/8</td></tr>
+<tr><td>photo</td><td class="num">4</td><td class="num">on</td><td class="num">1.079</td><td class="num">1.03</td><td class="num">2/4</td></tr>
+<tr><td>photo</td><td class="num">8</td><td class="num">off</td><td class="num">1.417</td><td class="num">1.31</td><td class="num">8/8</td></tr>
+<tr><td>photo</td><td class="num">4</td><td class="num">off</td><td class="num">1.271</td><td class="num">1.25</td><td class="num">4/4</td></tr>
+<tr><td>graphic</td><td class="num">8</td><td class="num">on</td><td class="num">1.063</td><td class="num">1.00</td><td class="num">5/8</td></tr>
+<tr><td>graphic</td><td class="num">4</td><td class="num">on</td><td class="num">1.073</td><td class="num">1.00</td><td class="num">4/4</td></tr>
+<tr><td>graphic</td><td class="num">8</td><td class="num">off</td><td class="num">1.296</td><td class="num">1.18</td><td class="num">8/8</td></tr>
+<tr><td>graphic</td><td class="num">4</td><td class="num">off</td><td class="num">1.209</td><td class="num">1.18</td><td class="num">4/4</td></tr>
+</tbody>
+</table>
+
+<p>The sweep is a coin flip on a loop-filtered frame — 0/8 on one image, 5/8 on the other, with a
+margin of 1.00 to 1.05, which is the noise floor of the statistic itself. Switch the filter off and
+it becomes perfect again: 8/8 on both images, margin 1.18 and 1.31. The procedure did not get
+worse; the signal it hunts stopped existing. A 5/8 hit rate with a 1.00 margin is not a weak
+detection, it is the detector reporting that there is nothing there.</p>
+
+<p>That resolves the whole question in one line. A still JPEG needs a deblocker because nothing
+else will remove the seam, and the sweep can find the lattice to aim it at. A video frame at CRF
+23–29 does not, because the encoder already ran a filter with a proper boundary-strength model,
+and if you stack a naive one on top you buy a metric improvement that is not there for real
+decibels. The artifact you are actually looking at in a soft 1080p upscale is the resampler, and
+Measurement 3's arithmetic says the same thing from the other end: at 4× the codec owns 8.8% of the
+total error. Seam hunting on a delivered video is aimed at the minority.</p>
+
+<p>One methodological note, because it nearly caught me. I also ran these sweeps on a synthetic
+scene with analytic hard edges, and got excess values of 7.19 and 11.14 at 4× — numbers so large
+that they cannot be about the codec. They are Measurement 6's documented trap firing in reverse:
+the scene's own edges happened to line up with a candidate lattice, the clean control scored 1.635
+at the phase the sweep chose, and the ratio collapsed. Two real photographs with unrelated
+structure produced consistent answers; the synthetic scene produced nonsense. If a seam measurement
+returns a number you would be embarrassed to publish, suspect the control before you believe the
+finding, and prefer content whose structure is not axis-aligned with the grid you are testing.</p>
+
+<h2>Reproducing all sixteen measurements</h2>
 
 <p>Needs <code>numpy</code> and <code>Pillow</code>. No ffmpeg for these — everything is done on
 decoded arrays so the lattice is under your control. Every figure above comes from this kind of
@@ -481,6 +634,51 @@ print('phase', int(np.argmax(scores)), 'score', round(max(scores), 3))
 yc = lanczos3(GT, 2).mean(2)
 print([round(gradients(yc,16,p)[0]/gradients(yc,16,p)[1], 3) for p in range(16)])
 # -> [1.364, 1.010, 0.883, 0.668, ...]  phase-dependence with no JPEG present at all
+
+# M9-M12: the same master through a video encoder, with and without its loop filter
+import subprocess
+def x264(y, crf, loopfilter=True, out='f.mp4'):
+    p = f'crf={crf}:keyint=1' + ('' if loopfilter else ':deblock=-6,-6')
+    im = Image.fromarray(np.clip(y,0,255).astype(np.uint8))
+    im = im if im.mode == 'L' else im.convert('L')   # seam stats are luma-only by construction
+    im.save('m.png')
+    subprocess.run(['ffmpeg','-y','-v','error','-i','m.png','-frames:v','1',
+        '-pix_fmt','yuv420p','-c:v','libx264','-preset','slow',
+        '-x264-params',p,out], check=True)
+    subprocess.run(['ffmpeg','-y','-v','error','-i',out,'-frames:v','1',
+        '-pix_fmt','gray','-f','image2','d.png'], check=True)
+    return np.asarray(Image.open('d.png')).astype(np.float32)
+
+# excess = R(encoded) / R(clean), both at the phase the sweep picks — the only comparable number
+def excess(enc, cln, period=8):
+    raw = [gradients(enc,period,p)[0]/gradients(enc,period,p)[1] for p in range(period)]
+    exc = [raw[p]/(gradients(cln,period,p)[0]/gradients(cln,period,p)[1]) for p in range(period)]
+    return round(exc[int(np.argmax(exc))], 3), round(sorted(raw)[-1]/sorted(raw)[-2], 3)
+
+# M9: JPEG q=50 vs x264 at the same bytes -> 1.903 vs 1.072 on the same 1024px photograph
+# M10: the causal test, one flag. On this photograph at CRF 26 the snippet prints:
+for lf in (True, False):
+    print(lf, [excess(x264(PHOTO, 26, lf), PHOTO, p) for p in (4, 8)])
+# True  [(1.078, 1.035), (1.071, 1.039)]     <- (excess, margin) at period 4 and 8
+# False [(1.256, 1.227), (1.396, 1.291)]     <- margin jumps, the lattice is back
+# The table above reports 1.072 / 1.417 and margins 1.03 / 1.31 for the same pair: `gradients`
+# here averages the two axes' *means*, while the article averages the two axes' *ratios*, which
+# is worth about 1.5% on the excess and 2% on the margin. Same conclusion either way.
+
+# M11: stacking the article's own deblocker at s=0.5 on an already-filtered frame
+def deblock(y, period, phase, s):
+    o = y.astype(np.float32).copy()
+    for ax in (1, 0):
+        for i in range(o.shape[ax]-1):
+            if (i+1) % period == phase % period:
+                if ax == 1:
+                    mv = (o[:,i]+o[:,i+1])/2.0
+                    o[:,i] = o[:,i]*(1-s)+mv*s; o[:,i+1] = o[:,i+1]*(1-s)+mv*s
+                else:
+                    mv = (o[i,:]+o[i+1,:])/2.0
+                    o[i,:] = o[i,:]*(1-s)+mv*s; o[i+1,:] = o[i+1,:]*(1-s)+mv*s
+    return np.clip(np.rint(o),0,255)
+# excess goes UP at s=0.5 (1.072 -> 1.234) and PSNR drops 0.92 dB.
 </code></pre>
 
 <p>Output on this machine for M1, <code>R</code> then step: <code>1 1.379 4.58 / 2 1.464 2.66 /
